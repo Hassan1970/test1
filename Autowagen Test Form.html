@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vehicle & Parts Entry</title>
+<style>
+    body { font-family: Arial, sans-serif; background: black; color: white; padding: 20px; }
+    .container { max-width: 1000px; margin: auto; background: #1c1c1c; padding: 20px; border-radius: 8px; }
+    h2 { text-align: center; color: red; margin-bottom: 20px; }
+    label { display: block; margin-top: 10px; font-weight: bold; color: #ccc; }
+    input, select, textarea { width: 100%; padding: 8px; margin-top: 5px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; }
+    button { margin-top: 20px; padding: 10px; width: 100%; background: red; color: white; border: none; cursor: pointer; font-weight: bold; }
+    button:hover { background: #ff4c4c; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #222; color: white; }
+    table, th, td { border: 1px solid #555; }
+    th, td { padding: 8px; text-align: left; }
+    th { background: #333; }
+    .section-title { margin-top: 20px; font-weight: bold; font-size: 18px; border-bottom: 1px solid #555; padding-bottom: 5px; color: red; }
+</style>
+<script>
+let currentVehicle = null;
+let partsDataStore = [];
+
+// Parts hierarchy (simplified example)
+const partsData = {
+    "Engine (Powertrain)": { "Fuel System": ["Fuel Tank","Fuel Pump","Fuel Filter"], "Ignition System": ["Spark Plugs","Ignition Coils"] },
+    "Transmission / Drivetrain": { "Gearbox": ["Manual","Automatic"], "Clutch (Manual)": [], "Differential": ["Front Differential","Rear Differential"] },
+    "Brakes": { "Foundation Brakes": ["Front Brake Caliper RH","Front Brake Caliper LH"], "ABS": ["ABS Module"] },
+    "Suspension": { "Springs": ["Front Spring RH","Rear Spring LH"], "Shock Absorbers": ["Front Shock RH","Rear Shock LH"] },
+    "Electrical": { "Lighting": ["Headlight RH","Headlight LH"], "Audio": ["Radio","Touchscreen Head Unit"] },
+    "Body": { "Doors": ["Front Door RH","Front Door LH"], "Windows": ["Windshield","Rear Window"] }
+};
+
+// Component breakdown templates
+const breakdowns = {
+    "Headlight RH": ["Headlight Housing RH","Headlight Lens RH","Bulbs RH"],
+    "Headlight LH": ["Headlight Housing LH","Headlight Lens LH","Bulbs LH"],
+    "Front Door RH": ["Door Shell RH","Door Glass RH","Handle RH","Lock RH"],
+    "Front Door LH": ["Door Shell LH","Door Glass LH","Handle LH","Lock LH"]
+};
+
+// Dropdown functions
+function updateSubCategory() {
+    const mainCat = document.getElementById("partMainCategory").value;
+    const subCat = document.getElementById("partSubCategory");
+    const type = document.getElementById("partType");
+    const comp = document.getElementById("partComponent");
+    subCat.innerHTML = "<option value=''>--Select Sub Category--</option>";
+    type.innerHTML = "<option value=''>--Select Type--</option>";
+    comp.innerHTML = "<option value=''>--Select Component--</option>";
+    if (mainCat && partsData[mainCat]) Object.keys(partsData[mainCat]).forEach(s => subCat.add(new Option(s,s)));
+}
+function updateType() {
+    const mainCat = document.getElementById("partMainCategory").value;
+    const subCat = document.getElementById("partSubCategory").value;
+    const type = document.getElementById("partType");
+    const comp = document.getElementById("partComponent");
+    type.innerHTML = "<option value=''>--Select Type--</option>";
+    comp.innerHTML = "<option value=''>--Select Component--</option>";
+    if (mainCat && subCat && partsData[mainCat][subCat].length>0) partsData[mainCat][subCat].forEach(t => type.add(new Option(t,t)));
+}
+function updateComponent() {
+    const typeVal = document.getElementById("partType").value;
+    const comp = document.getElementById("partComponent");
+    comp.innerHTML = "<option value=''>--Select Component--</option>";
+    if(typeVal) comp.add(new Option(typeVal,typeVal));
+}
+
+// Save vehicle
+function saveVehicle(e) {
+    e.preventDefault();
+    const data = {
+        stockCode: document.getElementById("stockCode").value,
+        vin: document.getElementById("vin").value,
+        chassis: document.getElementById("chassis").value,
+        colour: document.getElementById("colour").value,
+        datePurchased: document.getElementById("datePurchased").value,
+        sellerName: document.getElementById("sellerName").value,
+        sellerID: document.getElementById("sellerID").value,
+        sellerAddress: document.getElementById("sellerAddress").value,
+        pricePaid: document.getElementById("pricePaid").value,
+        make: document.getElementById("make").value,
+        model: document.getElementById("model").value,
+        year: document.getElementById("year").value,
+        images: Array.from(document.querySelectorAll(".vehicleImage")).map(i=>i.files[0]?.name || "")
+    };
+    currentVehicle = data;
+    document.getElementById("vehicleForm").style.display="none";
+    document.getElementById("partsSection").style.display="block";
+    document.getElementById("vehicleSummary").innerText = `Adding parts for: ${data.make} ${data.model} (${data.year}) VIN: ${data.vin}`;
+}
+
+// Generate stock code
+function generateStockCode(comp, pos, side) {
+    const make = currentVehicle.make.toUpperCase().replace(/\s+/g,"");
+    const c = comp.toUpperCase().replace(/\s+/g,"");
+    return `${c}-${pos.substring(0,2).toUpperCase()}-${side.substring(0,2).toUpperCase()}-${make}-${currentVehicle.stockCode}`;
+}
+
+// Save part with automatic breakdown
+function savePart(e){
+    e.preventDefault();
+    if(!currentVehicle){ alert("Enter vehicle details first!"); return; }
+
+    const mainCategory = document.getElementById("partMainCategory").value;
+    const subCategory = document.getElementById("partSubCategory").value;
+    const type = document.getElementById("partType").value;
+    const component = document.getElementById("partComponent").value;
+    const position = document.getElementById("partPosition").value;
+    const side = document.getElementById("partSide").value;
+    const price = document.getElementById("partPrice").value;
+    const notes = document.getElementById("partNotes").value;
+
+    let partsToAdd = [];
+
+    if(breakdowns[component]){
+        breakdowns[component].forEach(subComp=>{
+            partsToAdd.push({
+                mainCategory, subCategory, type,
+                component: subComp,
+                position, side, price, notes,
+                stockCode: generateStockCode(subComp, position, side)
+            });
+        });
+    } else {
+        partsToAdd.push({
+            mainCategory, subCategory, type,
+            component, position, side, price, notes,
+            stockCode: generateStockCode(component, position, side)
+        });
+    }
+
+    partsDataStore.push(...partsToAdd);
+    renderPartsTable();
+    document.getElementById("partsForm").reset();
+}
+
+// Render table
+function renderPartsTable() {
+    const tbody = document.getElementById("partsTableBody");
+    tbody.innerHTML = "";
+    partsDataStore.forEach((p,i)=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${i+1}</td>
+                        <td>${p.stockCode}</td>
+                        <td>${p.mainCategory}</td>
+                        <td>${p.subCategory}</td>
+                        <td>${p.type}</td>
+                        <td>${p.component}</td>
+                        <td>${p.position}</td>
+                        <td>${p.side}</td>
+                        <td>${p.price}</td>
+                        <td>${p.notes}</td>
+                        <td><button onclick="removePart(${i})" style="background:#555;color:white;">Remove</button></td>`;
+        tbody.appendChild(tr);
+    });
+}
+
+// Remove part
+function removePart(index){
+    partsDataStore.splice(index,1);
+    renderPartsTable();
+}
+</script>
+</head>
+<body>
+<div class="container">
+<h2>Vehicle Entry & Parts Management</h2>
+
+<form id="vehicleForm" onsubmit="saveVehicle(event)">
+<div class="section-title">Vehicle Details & Admin Data</div>
+<label>Stock Code:</label><input type="text" id="stockCode" required>
+<label>VIN Number:</label><input type="text" id="vin" required>
+<label>Chassis Number:</label><input type="text" id="chassis" required>
+<label>Colour of Vehicle:</label><input type="text" id="colour">
+<label>Date Purchased:</label><input type="date" id="datePurchased">
+<label>Name of Seller:</label><input type="text" id="sellerName">
+<label>ID of Seller:</label><input type="text" id="sellerID">
+<label>Address of Seller:</label><input type="text" id="sellerAddress">
+<label>Price Paid:</label><input type="number" step="0.01" id="pricePaid">
+<label>Make:</label><input type="text" id="make" required>
+<label>Model:</label><input type="text" id="model" required>
+<label>Year:</label><input type="number" id="year" required>
+
+<div class="section-title">Vehicle Images (up to 7)</div>
+<input type="file" class="vehicleImage" accept="image/*">
+<input type="file" class="vehicleImage" accept="image/*">
+<input type="file" class="vehicleImage" accept="image/*">
+<input type="file" class="vehicleImage" accept="image/*">
+<input type="file" class="vehicleImage" accept="image/*">
+<input type="file" class="vehicleImage" accept="image/*">
+<input type="file" class="vehicleImage" accept="image/*">
+
+<button type="submit">Save Vehicle</button>
+</form>
+
+<div id="partsSection" style="display:none">
+<div class="section-title" id="vehicleSummary"></div>
+<form id="partsForm" onsubmit="savePart(event)">
+<label>Main Category:</label>
+<select id="partMainCategory" onchange="updateSubCategory()" required>
+<option value="">--Select Main Category--</option>
+<option>Engine (Powertrain)</option>
+<option>Transmission / Drivetrain</option>
+<option>Brakes</option>
+<option>Suspension</option>
+<option>Electrical</option>
+<option>Body</option>
+</select>
+
+<label>Sub Category:</label>
+<select id="partSubCategory" onchange="updateType()" required>
+<option value="">--Select Sub Category--</option>
+</select>
+
+<label>Type:</label>
+<select id="partType" onchange="updateComponent()">
+<option value="">--Select Type--</option>
+</select>
+
+<label>Component:</label>
+<select id="partComponent" required>
+<option value="">--Select Component--</option>
+</select>
+
+<label>Position:</label>
+<select id="partPosition" required>
+<option>Front</option><option>Rear</option><option>Middle</option>
+</select>
+
+<label>Side:</label>
+<select id="partSide" required>
+<option>RH</option><option>LH</option><option>N/A</option>
+</select>
+
+<label>Price:</label><input type="number" step="0.01" id="partPrice">
+
+<label>Notes:</label><textarea id="partNotes" rows="3"></textarea>
+
+<button type="submit">Add Part</button>
+</form>
+
+<table>
+<thead>
+<tr>
+<th>#</th><th>Stock Code</th><th>Main</th><th>Sub</th><th>Type</th><th>Component</th><th>Position</th><th>Side</th><th>Price</th><th>Notes</th><th>Action</th>
+</tr>
+</thead>
+<tbody id="partsTableBody"></tbody>
+</table>
+</div>
+</div>
+</body>
+</html>
